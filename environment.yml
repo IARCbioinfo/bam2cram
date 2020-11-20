@@ -1,0 +1,7 @@
+name: bam2cram
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - samtools=1.11 #1.10 conflicts with sambamba 0.7.1
