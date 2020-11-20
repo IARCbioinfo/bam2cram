@@ -1,10 +1,9 @@
 ################## BASE IMAGE #####################
-FROM continuumio/miniconda3:4.7.12
+FROM nfcore/base
 
-################## METADATA #######################
-
-LABEL base_image="continuumio/miniconda3"
-LABEL version="4.7.12"
+################## METADATA ######################
+LABEL base_image="nfcore/base"
+LABEL version="1.0"
 LABEL software="bam2cram"
 LABEL software.version="1.0"
 LABEL about.summary="Container image containing all requirements for save sam2cram conversion"
