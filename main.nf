@@ -13,7 +13,6 @@ def show_help (){
       --bams [directory]                input folder with BAM files and indexes
     References
       --fasta [file]                  Path to fasta reference to encode the CRAM file
-      --fai [file]                    Path to fasta reference index [samtools faidx]
     Input alternatives:
       --bam_csv                    file with tabular data for each sample to process [label bam index ]
       -profile [str]              Configuration profile to use.
@@ -36,13 +35,23 @@ log.info IARC_Header()
 log.info tool_header()
 
 //check fasta and fasta index
-if (!params.fasta && !params.fai) exit 1, "The reference fasta file need to be provided!"
+if (!params.fasta) exit 1, "The reference fasta file need to be provided!"
+
 //we check the reference
 ch_fasta = Channel.value(file(params.fasta)).ifEmpty{exit 1, "Fasta file not found: ${params.fasta}"}
-ch_fai =   Channel.value(file(params.fai)).ifEmpty{exit 1, "fai index file not found: ${params.fai}"}
+ch_fai =   Channel.value(file(params.fasta+".fai")).ifEmpty{exit 1, "fai index file not found: ${params.fasta}.fai"}
+
+//check that BAM input is provided!
+if(!params.bam_csv && !params.bams) exit 1, "No --bam_csv nor --bams options provided!"
 
 
-//see file ./test_dataset/sample_fwrev.txt
+//we print the parameters
+log.info "\n"
+log.info "-\033[2m------------------Calling PARAMETERS--------------------\033[0m-"
+log.info params.collect{ k,v -> "${k.padRight(18)}: $v"}.join("\n")
+log.info "-\033[2m--------------------------------------------------------\033[0m-"
+log.info "\n"
+
 if(params.bam_csv) {
       Channel.fromPath(file(params.bam_csv)).splitCsv(header: true, sep: '\t', strip: true)
                       .map{row -> [ row.label, file(row.bam), file(row.index)]}
@@ -50,7 +59,7 @@ if(params.bam_csv) {
                       .into { inputbams; bamstats; sizebams }
 
 }else{
-
+  if(file(params.bams).listFiles().findAll { it.name ==~ /.*bam/ }.size() > 0){
         bams = Channel.fromPath( params.bams+'/*.bam' )
                 .map {path -> [ path.name.replace(".bam",""),path]}
         bams_index = Channel.fromPath( params.bams+'/*.bam.bai')
@@ -58,6 +67,9 @@ if(params.bam_csv) {
         //we create the chanel
         files = bams.join(bams_index)
         files.into {inputbams; bamstats; sizebams}
+  }else{
+    println "ERROR: input folder ${params.bams} contains no BAM files"; System.exit(1)
+  }
 }
 
 
