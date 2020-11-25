@@ -13,6 +13,7 @@ def show_help (){
       --bams [directory]                input folder with BAM files and indexes
     References
       --fasta [file]                  Path to fasta reference to encode the CRAM file
+      --fai    [file]                 Path to fasta reference index.
     Input alternatives:
       --bam_csv                    file with tabular data for each sample to process [label bam index ]
       -profile [str]              Configuration profile to use.
@@ -26,6 +27,8 @@ def show_help (){
 params.help = null
 params.bams = null
 params.bam_csv = null
+params.fasta= null
+params.fai = null
 
 // Show help message
 if (params.help) exit 0, show_help()
@@ -35,15 +38,13 @@ log.info IARC_Header()
 log.info tool_header()
 
 //check fasta and fasta index
-if (!params.fasta) exit 1, "The reference fasta file need to be provided!"
+if (!params.fasta || !params.fai) exit 1, "The reference fasta file with its index need to be provided!"
 
 //we check the reference
 ch_fasta = Channel.value(file(params.fasta)).ifEmpty{exit 1, "Fasta file not found: ${params.fasta}"}
-ch_fai =   Channel.value(file(params.fasta+".fai")).ifEmpty{exit 1, "fai index file not found: ${params.fasta}.fai"}
-
+ch_fai =   Channel.value(file(params.fai)).ifEmpty{exit 1, "fai index file not found: ${params.fai}"}
 //check that BAM input is provided!
 if(!params.bam_csv && !params.bams) exit 1, "No --bam_csv nor --bams options provided!"
-
 
 //we print the parameters
 log.info "\n"
@@ -76,8 +77,7 @@ if(params.bam_csv) {
 
 //map the rna-seq reads to the genome
 process bam2cram{
-  tag "${sample}"
-  label 'load_low2'
+  tag "${sample}-2cram"
   //we can remove this to don't keep the bam files
   publishDir "${params.output_folder}/CRAM", mode: 'copy'
 
@@ -98,7 +98,7 @@ process bam2cram{
 
 //we compute some stat for original bam files
 process stats_bams{
-
+  tag "${sample}-bam_stats"
   publishDir "${params.output_folder}/qc/bam", mode: 'copy'
   input:
     set val(sample), file(bam), file(bam_index) from bamstats
@@ -113,6 +113,8 @@ process stats_bams{
 
 //we compute some stat for original bam files
 process stats_crams{
+  tag "${sample}-cram_stats"
+
   publishDir "${params.output_folder}/qc/cram", mode: 'copy'
   input:
     set val(sample), file(cram), file(cram_index) from cramstats
@@ -131,6 +133,7 @@ cram_bam_qc=cram_qc.join(bam_qc)
 
 //we merge both cram_qc and bam_qc to check if they are identical
 process check_conversion{
+  tag "${sample}-check"
   publishDir "${params.output_folder}/qc/check", mode: 'copy'
 
   input:
