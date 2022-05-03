@@ -1,4 +1,4 @@
-# bam2cram
+# bam2cram-nf
 A repository to convert BAM->CRAM files
 
 ## run examples
