@@ -8,7 +8,7 @@ def show_help (){
     log.info"""
     Usage:
     The typical command for running the pipeline is as follows:
-    nextflow run iarc/bam2cram --bams input_folder --fasta ref.fa --fai ref.fa.fai -profile singularity
+    nextflow run iarcbioinfo/bam2cram-nf --bams input_folder --fasta ref.fa --fai ref.fa.fai -profile singularity
     Mandatory arguments:
       --bams [directory]                input folder with BAM files and indexes
     References
