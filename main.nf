@@ -1,147 +1,105 @@
-#!/usr/bin/env nextflow
 
+//map the rna-seq reads to the genome
 
-//help function for the tool
-def show_help (){
-  log.info IARC_Header()
-  log.info tool_header()
-    log.info"""
-    Usage:
-    The typical command for running the pipeline is as follows:
-    nextflow run iarc/bam2cram --bams input_folder --fasta ref.fa --fai ref.fa.fai -profile singularity
-    Mandatory arguments:
-      --bams [directory]                input folder with BAM files and indexes
-    References
-      --fasta [file]                  Path to fasta reference to encode the CRAM file
-      --fai    [file]                 Path to fasta reference index.
-    Input alternatives:
-      --bam_csv                    file with tabular data for each sample to process [label bam index ]
-      -profile [str]              Configuration profile to use.
-                                  Available: singularity
-    Output:
-    --output_folder                ouput folder [def: ./results]
-    """.stripIndent()
-}
+process bam2cram{
+  
+  tag "${sample}-2cram"
+  //we can remove this to don't keep the bam files
+  publishDir "${params.outdir}/CRAM", mode: 'copy'
 
-// we star coding the pipeline
-params.help = null
-params.bams = null
-params.bam_csv = null
-params.fasta= null
-params.fai = null
+  input:
+      tuple val(sample), path(bam), path(bam_index)
+      path ref
+      path ref_index
+  
+  output:
+      tuple val(sample), file("${sample}.cram"), file("${sample}.cram.crai"), emit: crams
 
-// Show help message
-if (params.help) exit 0, show_help()
+  script:
 
-//print header and tool name
-log.info IARC_Header()
-log.info tool_header()
-
-//check fasta and fasta index
-if (!params.fasta || !params.fai) exit 1, "The reference fasta file with its index need to be provided!"
-
-//we check the reference
-ch_fasta = Channel.value(file(params.fasta)).ifEmpty{exit 1, "Fasta file not found: ${params.fasta}"}
-ch_fai =   Channel.value(file(params.fai)).ifEmpty{exit 1, "fai index file not found: ${params.fai}"}
-//check that BAM input is provided!
-if(!params.bam_csv && !params.bams) exit 1, "No --bam_csv nor --bams options provided!"
-
-//we print the parameters
-log.info "\n"
-log.info "-\033[2m------------------Calling PARAMETERS--------------------\033[0m-"
-log.info params.collect{ k,v -> "${k.padRight(18)}: $v"}.join("\n")
-log.info "-\033[2m--------------------------------------------------------\033[0m-"
-log.info "\n"
-
-if(params.bam_csv) {
-      Channel.fromPath(file(params.bam_csv)).splitCsv(header: true, sep: '\t', strip: true)
-                      .map{row -> [ row.label, file(row.bam), file(row.index)]}
-                      .ifEmpty{exit 1, "params.bams_csv was empty - no input files supplied" }
-                      .into { inputbams; bamstats; sizebams }
-
-}else{
-  if(file(params.bams).listFiles().findAll { it.name ==~ /.*bam/ }.size() > 0){
-        bams = Channel.fromPath( params.bams+'/*.bam' )
-                .map {path -> [ path.name.replace(".bam",""),path]}
-        bams_index = Channel.fromPath( params.bams+'/*.bam.bai')
-                .map {  path -> [ path.name.replace(".bam.bai",""), path ] }
-        //we create the chanel
-        files = bams.join(bams_index)
-        files.into {inputbams; bamstats; sizebams}
+  if(params.debug == true){
+    """
+     echo samtools view -C  -T ${ref} ${bam} -o ${sample}.cram
+     echo samtools index ${sample}.cram
+     touch ${sample}.cram ${sample}.cram.crai
+    """
   }else{
-    println "ERROR: input folder ${params.bams} contains no BAM files"; System.exit(1)
+  """
+      samtools view -C  -T ${ref} ${bam} -o ${sample}.cram
+      samtools index ${sample}.cram
+  """
   }
 }
 
 
-
-//map the rna-seq reads to the genome
-process bam2cram{
-  tag "${sample}-2cram"
-  //we can remove this to don't keep the bam files
-  publishDir "${params.output_folder}/CRAM", mode: 'copy'
-
-  input:
-      set val(sample), file(bam), file(bam_index) from inputbams
-      file(ref) from ch_fasta
-      file(ref_index) from ch_fai
-  output:
-      //output CRAM files
-      set val(sample), file("${sample}.cram"), file("${sample}.cram.crai") into cramfiles, cramstats, sizecrams
-
-  script:
-  """
-  samtools view -C  -T ${ref} ${bam} -o ${sample}.cram
-  samtools index ${sample}.cram
-  """
-}
-
 //we compute some stat for original bam files
 process stats_bams{
   tag "${sample}-bam_stats"
-  publishDir "${params.output_folder}/qc/bam", mode: 'copy'
+  publishDir "${params.outdir}/qc/bam", mode: 'copy'
   input:
-    set val(sample), file(bam), file(bam_index) from bamstats
+    tuple val(sample), file(bam), file(bam_index)
   output:
-    set val(sample), file("${sample}.bam.flagstat"), file("${sample}.bam.stats") into bam_qc
+    tuple val(sample), file("${sample}.bam.flagstat"), file("${sample}.bam.stats"), emit: bam_qc
   script:
+  if(params.debug == true){
+  """
+  echo samtools flagstat ${bam} > ${sample}.bam.flagstat
+  echo samtools stats ${bam} > ${sample}.bam.stats
+  touch ${sample}.bam.flagstat ${sample}.bam.stats
+  """
+  }else{
   """
   samtools flagstat ${bam} > ${sample}.bam.flagstat
   samtools stats ${bam} > ${sample}.bam.stats
   """
+  }
 }
+
 
 //we compute some stat for original bam files
 process stats_crams{
   tag "${sample}-cram_stats"
 
-  publishDir "${params.output_folder}/qc/cram", mode: 'copy'
+  publishDir "${params.outdir}/qc/cram", mode: 'copy'
   input:
-    set val(sample), file(cram), file(cram_index) from cramstats
+    tuple val(sample), file(cram), file(cram_index) 
   output:
-    set val(sample), file("${sample}.cram.flagstat"), file("${sample}.cram.stats") into cram_qc
+    tuple val(sample), file("${sample}.cram.flagstat"), file("${sample}.cram.stats"), emit: cram_qc
   script:
+  if(params.debug ==  true){
+  """
+  echo samtools flagstat ${cram} > ${sample}.cram.flagstat
+  echo samtools stats ${cram} > ${sample}.cram.stats
+  touch ${sample}.cram.flagstat
+  touch ${sample}.cram.stats
+  """
+    
+    }else{
   """
   samtools flagstat ${cram} > ${sample}.cram.flagstat
   samtools stats ${cram} > ${sample}.cram.stats
   """
+ }
 }
 
+
 //we join bam and cram qc output to compare them
-cram_bam_size=sizecrams.join(sizebams)
-cram_bam_qc=cram_qc.join(bam_qc)
+//cram_bam_size=sizecrams.join(sizebams)
+//cram_bam_qc=cram_qc.join(bam_qc)
 
 //we merge both cram_qc and bam_qc to check if they are identical
 process check_conversion{
   tag "${sample}-check"
-  publishDir "${params.output_folder}/qc/check", mode: 'copy'
+  publishDir "${params.outdir}/qc/check", mode: 'copy'
 
   input:
-    set val(sample), file(c_fs), file(c_stat), file(b_fs), file (b_stat) from cram_bam_qc
-    set val(sample), file(cram), file(cram_index), file(bam), file (bam_index) from cram_bam_size
-    //file qc_check from cram_bam_qc.collect()
+    tuple val(sample), file(c_fs), file(c_stat), file(b_fs), file (b_stat)
+    tuple val(sample), file(cram), file(cram_index), file(bam), file (bam_index)
+    
   output:
-    file("${sample}_check.report.txt") into report_qc
+    
+    path("${sample}_check.report.txt") , emit: report_qc
+   
    script:
    """
    if diff ${c_fs} ${b_fs} > /dev/null
@@ -168,29 +126,96 @@ process check_conversion{
    """
 }
 
-report_qc.collectFile(name: 'bam2cram_summary.txt', storeDir: params.output_folder, seed: 'ID\tflagstat\tstats\tBAM_size\tCRAM_size\n', newLine: false, skip: 1)
+//report_qc.collectFile(name: 'bam2cram_summary.txt', storeDir: params.output_folder, seed: 'ID\tflagstat\tstats\tBAM_size\tCRAM_size\n', newLine: false, skip: 1)
+
+workflow{
 
 
-//header for the IARC tools
+// Show help message
+if (params.help) exit 0, show_help()
+
+
+//print header and tool name
+ DGL_Header()
+ tool_header()
+
+//check fasta and fasta index
+if (!params.fasta || !params.fai) exit 1, "The reference fasta file with its fai index have to be provided!"
+
+//we check the reference
+//ch_fasta = Channel.fromPath(params.fasta).ifEmpty{exit 1, "Fasta file not found: ${params.fasta}"}
+//ch_fai =   Channel.fromPath(params.fai).ifEmpty{exit 1, "fai index file not found: ${params.fai}"}
+
+ch_fasta = file(params.fasta)
+ch_fai =   file(params.fai)
+//check that BAM input is provided!
+if(!params.bam_csv && !params.bams) exit 1, "No --bam_csv nor --bams options provided!"
+
+//we print the parameters
+log.info "\n"
+log.info "-------------------Calling PARAMETERS--------------------"
+log.info params.collect{ k,v -> "${k.padRight(18)}: $v"}.join("\n")
+log.info "--------------------------------------------------------"
+log.info "\n"
+if(params.bam_csv){
+read_bams_ch=Channel.fromPath(params.bam_csv) \
+        | splitCsv(header:true) \
+        | map { row-> tuple(row.sampleId, file(row.bam), file(row.bai))}
+}
+  B2C=bam2cram(read_bams_ch,ch_fasta,ch_fai)
+  BMS=stats_bams(read_bams_ch)
+  CMS=stats_crams(B2C.crams)
+  //we check conversion
+  CRC=check_conversion(CMS.join(BMS),B2C.crams.join(read_bams_ch))
+  //we collect all stats
+  CRC.report_qc.collectFile(name: 'bam2cram_summary.txt', storeDir: params.outdir, seed: 'ID\tflagstat\tstats\tBAM_size\tCRAM_size\n', newLine: false, skip: 1)
+}
+
+
+//help function for the tool
+def show_help (){
+  DGL_Header()
+  tool_header()
+    log.info"""
+    Usage:
+    The typical command for running the pipeline is as follows:
+    nextflow run digenomalab/bam2cram --bam_csv bams.csv --fasta ref.fa --fai ref.fa.fai -profile kutral
+    Mandatory arguments:
+      --bam_csv                    file with tabular data for each sample to process [label bam index ]
+
+    References
+      --fasta [file]                  Path to fasta reference to encode the CRAM file
+      --fai    [file]                 Path to fasta reference index.
+    Input alternatives:
+      -profile [str]              Configuration profile to use.
+                                  Available: kutral
+    Output:
+      --outdir                ouput folder [def: ./results]
+    """.stripIndent()
+}
+
+
+// header for the Di Genoma Lab tools
 // the logo was generated using the following page
 // http://patorjk.com/software/taag  (ANSI logo generator)
-def IARC_Header (){
-     return  """
-#################################################################################
-# ██╗ █████╗ ██████╗  ██████╗██████╗ ██╗ ██████╗ ██╗███╗   ██╗███████╗ ██████╗  #
-# ██║██╔══██╗██╔══██╗██╔════╝██╔══██╗██║██╔═══██╗██║████╗  ██║██╔════╝██╔═══██╗ #
-# ██║███████║██████╔╝██║     ██████╔╝██║██║   ██║██║██╔██╗ ██║█████╗  ██║   ██║ #
-# ██║██╔══██║██╔══██╗██║     ██╔══██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ██║   ██║ #
-# ██║██║  ██║██║  ██║╚██████╗██████╔╝██║╚██████╔╝██║██║ ╚████║██║     ╚██████╔╝ #
-# ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═════╝ ╚═╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝      ╚═════╝  #
-# Nextflow pipelines for cancer genomics.########################################
-"""
+def DGL_Header (){
+
+log.info"""
+#########################################################################
+#  _____  _  _____                                  _           _       #
+# |  __ \\(_)/ ____|                                | |         | |      #
+# | |  | |_| |  __  ___ _ __   ___  _ __ ___   __ _| |     __ _| |__    #
+# | |  | | | | |_ |/ _ \\ '_ \\ / _ \\| '_ ` _ \\ / _` | |    / _` | '_ \\   #
+# | |__| | | |__| |  __/ | | | (_) | | | | | | (_| | |___| (_| | |_) |  #
+# |_____/|_|\\_____|\\___|_| |_|\\___/|_| |_| |_|\\__,_|______\\__,_|_.__/   #
+# Workflows for genomics.################################################
+""".stripIndent()
 }
 
 //this use ANSI colors to make a short tool description
 //useful url: http://www.lihaoyi.com/post/BuildyourownCommandLinewithANSIescapecodes.html
-def tool_header (){
-        return """
+def tool_header(){
+        log.info"""
         BAM\u001b[32;1m 2\u001b[33;1m CRAM\u001b[31;1m (${workflow.manifest.version})
-        """
+        """.stripIndent()
 }
